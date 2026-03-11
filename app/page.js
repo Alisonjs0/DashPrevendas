@@ -4,21 +4,124 @@ import { useEffect, useState } from "react";
 import DashboardStats from "@/components/DashboardStats";
 import SatisfactionChart from "@/components/SatisfactionChart";
 import ClientTable from "@/components/ClientTable";
-import { RefreshCcw, Search, Filter, X, ExternalLink } from "lucide-react";
+import { RefreshCcw, Search, Filter, X, ExternalLink, AlertTriangle } from "lucide-react";
 
 const DEFAULT_SHEET_URL = "https://docs.google.com/spreadsheets/d/1JhnWKiaCp-1sLx04vn4HKMiNMvSxgFu3rqvrBHUcJAU/edit?gid=0#gid=0";
+const ERRORS_SHEET_URL = "https://docs.google.com/spreadsheets/d/1JhnWKiaCp-1sLx04vn4HKMiNMvSxgFu3rqvrBHUcJAU/edit?gid=1068236709#gid=1068236709";
+const SCORE_KEYS = ["Conexão/Rapport", "Apres. Autoridade", "Entendimento Dores", "Apres. Solução", "Agendamento"];
+const FALLBACK_TOP_ERRORS = [
+    { erro: "Identificação incorreta do prospect", quantidade: 47, categoria: "Geral" },
+    { erro: "Não correção do erro de nome", quantidade: 47, categoria: "Geral" },
+    { erro: "Falta de resiliência e desistência precoce", quantidade: 47, categoria: "Geral" },
+    { erro: "Falta de preparo", quantidade: 47, categoria: "Geral" },
+];
+const FALLBACK_SDR_ERRORS = [
+    { nome: "(Top 3 Erros)", erros: [], total_erros_sdr: 0 },
+    {
+        nome: "Bruno Borges",
+        erros: [
+            { erro: "Identificação incorreta do prospect", quantidade: 3 },
+            { erro: "Não correção do erro de nome", quantidade: 3 },
+            { erro: "Falta de resiliência e desistência precoce", quantidade: 3 },
+        ],
+        total_erros_sdr: 9,
+    },
+    {
+        nome: "Gabriella",
+        erros: [
+            { erro: "Identificação incorreta do prospect", quantidade: 8 },
+            { erro: "Não correção do erro de nome", quantidade: 8 },
+            { erro: "Falta de resiliência e desistência precoce", quantidade: 8 },
+        ],
+        total_erros_sdr: 24,
+    },
+    {
+        nome: "Ligiane",
+        erros: [
+            { erro: "Identificação incorreta do prospect", quantidade: 8 },
+            { erro: "Não correção do erro de nome", quantidade: 8 },
+            { erro: "Falta de resiliência e desistência precoce", quantidade: 8 },
+        ],
+        total_erros_sdr: 24,
+    },
+    {
+        nome: "Revik Vinicius",
+        erros: [
+            { erro: "Identificação incorreta do prospect", quantidade: 20 },
+            { erro: "Não correção do erro de nome", quantidade: 20 },
+            { erro: "Falta de resiliência e desistência precoce", quantidade: 20 },
+        ],
+        total_erros_sdr: 60,
+    },
+    {
+        nome: "Wagner Ramon",
+        erros: [
+            { erro: "Identificação incorreta do prospect", quantidade: 7 },
+            { erro: "Não correção do erro de nome", quantidade: 7 },
+            { erro: "Falta de resiliência e desistência precoce", quantidade: 7 },
+        ],
+        total_erros_sdr: 21,
+    },
+];
+const FALLBACK_INSIGHT = "Com base nos feedbacks, o time de Inside Sales enfrenta um desafio sistêmico que engloba tanto a falta de processo (preparação) quanto a falta de técnica na abordagem inicial. Os erros de identificação incorreta do prospect e falta de preparo indicam uma falha generalizada na fase pré-ligação, sugerindo a necessidade de otimização e padronização no processo de pesquisa e validação de dados dos leads. Paralelamente, a não correção do erro de nome e a falta de resiliência e desistência precoce apontam para lacunas em habilidades cruciais de técnica de vendas, como escuta ativa, construção de rapport e o manejo eficaz de objeções iniciais para manter o prospect engajado. É imperativo abordar ambos os pilares com treinamentos específicos e a implementação de checklists ou roteiros pré-ligação para garantir uma abordagem mais profissional, personalizada e persistente desde o primeiro contato, impactando diretamente nas taxas de conversão de prospecção.";
+const FALLBACK_ERRORS_DATE = "2026-03-11";
 
-// Helper to parse JSON fields from sheet cells
+// Helper to parse JSON fields from sheet cells (handles CSV-exported/escaped strings)
 function parseJsonField(value) {
     if (!value) return null;
     if (Array.isArray(value)) return value;
-    if (typeof value === "string" && (value.trim().startsWith("[") || value.trim().startsWith("{"))) {
-        try {
-            const parsed = JSON.parse(value);
-            if (Array.isArray(parsed)) return parsed;
-        } catch (e) { }
+    if (typeof value !== "string") return null;
+
+    let raw = value.trim();
+
+    // Google Sheets CSV sometimes double-quotes embedded quotes: ""key"" -> "key"
+    if ((raw.startsWith('"') && raw.endsWith('"')) || (raw.startsWith("'") && raw.endsWith("'"))) {
+        raw = raw.slice(1, -1);
     }
-    return null;
+    raw = raw.replace(/""/g, '"');
+
+    if (!raw.startsWith('[') && !raw.startsWith('{')) return null;
+
+    try {
+        const parsed = JSON.parse(raw);
+        return Array.isArray(parsed) ? parsed : [parsed];
+    } catch {
+        // Last resort: try decoding HTML entities and retry
+        try {
+            const decoded = raw
+                .replace(/&quot;/g, '"')
+                .replace(/&#39;/g, "'")
+                .replace(/&amp;/g, '&');
+            const parsed = JSON.parse(decoded);
+            return Array.isArray(parsed) ? parsed : [parsed];
+        } catch {
+            return null;
+        }
+    }
+}
+
+function cleanRichText(value) {
+    return String(value || "")
+        .replace(/\*\*(.*?)\*\*/g, "$1")
+        .replace(/<[^>]+>/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+}
+
+function normalizeText(value) {
+    return String(value || "")
+    .replace(/[_-]+/g, " ")
+        .trim()
+        .replace(/\s+/g, " ");
+}
+
+function getSdrLabel(value) {
+    const normalized = normalizeText(value);
+    return normalized || "Não informado";
+}
+
+function getSdrKey(value) {
+    return getSdrLabel(value).toLocaleLowerCase("pt-BR");
 }
 
 function parseRowDate(value) {
@@ -75,12 +178,17 @@ function isMeetingScheduled(value) {
 
 export default function Home() {
     const [data, setData] = useState([]);
+    const [errorsData, setErrorsData] = useState([]);
+    const [errorsLoading, setErrorsLoading] = useState(true);
+    const [errorsFetchError, setErrorsFetchError] = useState(null);
     const [loading, setLoading] = useState(false);
     const [lastUpdated, setLastUpdated] = useState(null);
     const [sheetUrl, setSheetUrl] = useState(DEFAULT_SHEET_URL);
     const [sheetInputValue, setSheetInputValue] = useState(DEFAULT_SHEET_URL);
     const [sheetModalOpen, setSheetModalOpen] = useState(false);
     const [rankingModalOpen, setRankingModalOpen] = useState(false);
+    const [errorsModalOpen, setErrorsModalOpen] = useState(false);
+    const [activeTab, setActiveTab] = useState("dashboard");
 
     // Filter State
     const [searchTerm, setSearchTerm] = useState("");
@@ -116,6 +224,26 @@ export default function Home() {
         }
     };
 
+    const fetchErrorsData = async () => {
+        setErrorsLoading(true);
+        setErrorsFetchError(null);
+        try {
+            const res = await fetch(`/api/sheets?url=${encodeURIComponent(ERRORS_SHEET_URL)}`);
+            const jsonData = await res.json();
+            if (jsonData.error) {
+                console.error("Errors sheet API Error:", jsonData.error);
+                setErrorsFetchError(jsonData.error);
+            } else {
+                setErrorsData(Array.isArray(jsonData.data) ? jsonData.data : []);
+            }
+        } catch (error) {
+            console.error("Failed to fetch errors data", error);
+            setErrorsFetchError(error.message);
+        } finally {
+            setErrorsLoading(false);
+        }
+    };
+
     const handleLoadSheet = () => {
         if (!sheetInputValue.trim()) return;
         setSheetUrl(sheetInputValue.trim());
@@ -130,14 +258,20 @@ export default function Home() {
         return () => clearInterval(interval);
     }, [sheetUrl]);
 
+    useEffect(() => {
+        fetchErrorsData();
+        const interval = setInterval(fetchErrorsData, 30000);
+        return () => clearInterval(interval);
+    }, []);
+
     // Derived State: Filtered Data
     const filteredData = data.filter(item => {
         const prospect = (item["Prospect / Empressa"] || "").toLowerCase();
-        const sdr = (item["SDR / Pré-venda"] || "").toLowerCase();
+        const sdrKey = getSdrKey(item["SDR / Pré-venda"]);
         const isScheduled = isMeetingScheduled(item["Reunião Marcada?"]);
 
         const matchesSearch = prospect.includes(searchTerm.toLowerCase());
-        const matchesSdr = sdrFilter === "all" || sdr === sdrFilter.toLowerCase();
+        const matchesSdr = sdrFilter === "all" || sdrKey === sdrFilter;
         const matchesMeeting =
             meetingFilter === "all" ||
             (meetingFilter === "yes" && isScheduled) ||
@@ -156,31 +290,138 @@ export default function Home() {
     });
 
     // Unique SDRs for Filter Dropdown
-    const sdrs = [...new Set(data.map(item => item["SDR / Pré-venda"]).filter(Boolean))];
+    const sdrs = Object.values(
+        data.reduce((acc, item) => {
+            const label = getSdrLabel(item["SDR / Pré-venda"]);
+            const key = getSdrKey(item["SDR / Pré-venda"]);
+            if (!acc[key]) {
+                acc[key] = { key, label };
+            }
+            return acc;
+        }, {})
+    ).sort((a, b) => a.label.localeCompare(b.label, "pt-BR"));
 
     const sdrRanking = Object.entries(
         filteredData.reduce((acc, row) => {
-            const sdr = row["SDR / Pré-venda"] || "Não informado";
-            if (!acc[sdr]) acc[sdr] = 0;
+            const sdrKey = getSdrKey(row["SDR / Pré-venda"]);
+            const sdrLabel = getSdrLabel(row["SDR / Pré-venda"]);
+            if (!acc[sdrKey]) acc[sdrKey] = { name: sdrLabel, meetings: 0 };
             if (isMeetingScheduled(row["Reunião Marcada?"])) {
-                acc[sdr] += 1;
+                acc[sdrKey].meetings += 1;
             }
             return acc;
         }, {})
     )
-        .map(([name, meetings]) => ({ name, meetings }))
+        .map(([, value]) => value)
         .sort((a, b) => b.meetings - a.meetings || a.name.localeCompare(b.name, "pt-BR"));
 
     const sdrCallsRanking = Object.entries(
         filteredData.reduce((acc, row) => {
-            const sdr = row["SDR / Pré-venda"] || "Não informado";
-            if (!acc[sdr]) acc[sdr] = 0;
-            acc[sdr] += 1;
+            const sdrKey = getSdrKey(row["SDR / Pré-venda"]);
+            const sdrLabel = getSdrLabel(row["SDR / Pré-venda"]);
+            if (!acc[sdrKey]) acc[sdrKey] = { name: sdrLabel, calls: 0 };
+            acc[sdrKey].calls += 1;
             return acc;
         }, {})
     )
-        .map(([name, calls]) => ({ name, calls }))
+        .map(([, value]) => value)
         .sort((a, b) => b.calls - a.calls || a.name.localeCompare(b.name, "pt-BR"));
+
+    const sdrScoreRanking = Object.values(
+        filteredData.reduce((acc, row) => {
+            const sdrKey = getSdrKey(row["SDR / Pré-venda"]);
+            const sdrLabel = getSdrLabel(row["SDR / Pré-venda"]);
+            if (!acc[sdrKey]) {
+                acc[sdrKey] = {
+                    name: sdrLabel,
+                    callScoreSum: 0,
+                    scoredCalls: 0,
+                };
+            }
+
+            const rowScores = SCORE_KEYS
+                .map((key) => parseFloat(row[key]))
+                .filter((value) => !Number.isNaN(value));
+
+            if (rowScores.length > 0) {
+                const rowAverage = rowScores.reduce((sum, value) => sum + value, 0) / rowScores.length;
+                acc[sdrKey].callScoreSum += rowAverage;
+                acc[sdrKey].scoredCalls += 1;
+            }
+
+            return acc;
+        }, {})
+    )
+        .filter((item) => item.scoredCalls > 0)
+        .map((item) => ({
+            ...item,
+            averageScore: item.callScoreSum / item.scoredCalls,
+        }))
+        .sort((a, b) => b.averageScore - a.averageScore || b.scoredCalls - a.scoredCalls || a.name.localeCompare(b.name, "pt-BR"));
+
+    const recurringCriticalErrors = Object.values(
+        filteredData.reduce((acc, row) => {
+            const errors = parseJsonField(row["Erros Criticos"]);
+            if (!errors || errors.length === 0) return acc;
+
+            const prospectName = row["Prospect / Empressa"] || "Prospect não informado";
+
+            errors.forEach((errorItem) => {
+                const label = cleanRichText(errorItem);
+                if (!label) return;
+
+                const key = label.toLocaleLowerCase("pt-BR");
+                if (!acc[key]) {
+                    acc[key] = {
+                        key,
+                        label,
+                        count: 0,
+                        prospects: [],
+                    };
+                }
+
+                acc[key].count += 1;
+                if (!acc[key].prospects.includes(prospectName)) {
+                    acc[key].prospects.push(prospectName);
+                }
+            });
+
+            return acc;
+        }, {})
+    ).sort((a, b) => b.count - a.count || a.label.localeCompare(b.label, "pt-BR"));
+
+    // Flexible column lookup: find any key that matches (case-insensitive, trimmed)
+    function getErrCol(row, ...candidates) {
+        if (!row) return undefined;
+        const keys = Object.keys(row);
+        for (const candidate of candidates) {
+            const norm = candidate.trim().toLocaleLowerCase("pt-BR");
+            const match = keys.find((k) => k.trim().toLocaleLowerCase("pt-BR") === norm);
+            if (match !== undefined) return row[match];
+        }
+        return undefined;
+    }
+
+    const mainErrorsRow = errorsData.find((row) =>
+        getErrCol(row, "TOP ERROS", "TOP_ERROS") ||
+        getErrCol(row, "ERROS SDRs", "ERROS_SDRS", "ERROS SDRS") ||
+        getErrCol(row, "INSIGTH", "INSIGHT", "INSIGHTS") ||
+        getErrCol(row, "DATA")
+    );
+
+    const topErrors = parseJsonField(getErrCol(mainErrorsRow, "TOP ERROS", "TOP_ERROS")) || FALLBACK_TOP_ERRORS;
+    const sdrErrors = parseJsonField(getErrCol(mainErrorsRow, "ERROS SDRs", "ERROS_SDRS", "ERROS SDRS")) || FALLBACK_SDR_ERRORS;
+    const insightText = String(getErrCol(mainErrorsRow, "INSIGTH", "INSIGHT", "INSIGHTS") || FALLBACK_INSIGHT).trim();
+    const errorsDate = String(getErrCol(mainErrorsRow, "DATA") || FALLBACK_ERRORS_DATE).trim();
+
+    const sdrErrorsRanking = sdrErrors
+        .filter((item) => Number(item?.total_erros_sdr) > 0 && normalizeText(item?.nome) !== "Top 3 Erros")
+        .map((item) => ({
+            nome: normalizeText(item.nome),
+            total: Number(item.total_erros_sdr) || 0,
+            erros: Array.isArray(item.erros) ? item.erros : [],
+        }))
+        .sort((a, b) => b.total - a.total || a.nome.localeCompare(b.nome, "pt-BR"));
 
     return (
         <main className="min-h-screen p-5 md:p-8 bg-background text-foreground">
@@ -192,7 +433,9 @@ export default function Home() {
                             Dashboard de Pré-Vendas
                         </h1>
                         <p className="text-muted-foreground mt-2 text-slate-300 text-sm md:text-base">
-                            Visão geral — {filteredData.length} de {data.length} ligações exibidas
+                            {activeTab === "dashboard"
+                                ? `Visão geral — ${filteredData.length} de ${data.length} ligações exibidas`
+                                : `Análise consolidada de erros críticos — referência ${errorsDate}`}
                         </p>
                     </div>
                     <div className="flex items-center gap-2">
@@ -213,6 +456,30 @@ export default function Home() {
                     </div>
                 </header>
 
+                <div className="flex items-center gap-2 flex-wrap">
+                    <button
+                        onClick={() => setActiveTab("dashboard")}
+                        className={`px-4 py-2 rounded-lg border text-sm font-semibold transition-colors ${activeTab === "dashboard"
+                                ? "bg-sky-500/25 text-sky-100 border-sky-300/40"
+                                : "bg-secondary/45 text-slate-300 border-sky-300/20 hover:bg-secondary/65"
+                            }`}
+                    >
+                        Visão Geral
+                    </button>
+                    <button
+                        onClick={() => setActiveTab("principais-erros")}
+                        className={`px-4 py-2 rounded-lg border text-sm font-semibold transition-colors ${activeTab === "principais-erros"
+                                ? "bg-red-500/20 text-red-100 border-red-300/40"
+                                : "bg-secondary/45 text-slate-300 border-sky-300/20 hover:bg-secondary/65"
+                            }`}
+                    >
+                        Principais Erros
+                    </button>
+                </div>
+
+                {activeTab === "dashboard" ? (
+                    <>
+
                 {/* Stats & Charts Row */}
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                     <DashboardStats data={filteredData} />
@@ -222,7 +489,15 @@ export default function Home() {
                     </div>
                 </div>
 
-                <div className="flex justify-end">
+                <div className="flex justify-end gap-2 flex-wrap">
+                    <button
+                        onClick={() => setErrorsModalOpen(true)}
+                        disabled={recurringCriticalErrors.length === 0}
+                        className="inline-flex items-center gap-2 px-4 py-2 bg-red-500/15 hover:bg-red-500/25 text-red-100 border border-red-300/25 rounded-lg transition-colors text-sm font-semibold glass-panel disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                        <AlertTriangle size={16} />
+                        Erros recorrentes
+                    </button>
                     <button
                         onClick={() => setRankingModalOpen(true)}
                         className="px-4 py-2 bg-blue-500/20 hover:bg-blue-500/35 text-sky-100 border border-blue-300/35 rounded-lg transition-colors text-sm font-semibold glass-panel"
@@ -250,8 +525,8 @@ export default function Home() {
                             className="w-full px-4 py-2 bg-secondary/45 border border-sky-300/20 rounded-lg focus:outline-none focus:ring-1 focus:ring-sky-500/60 text-sm appearance-none cursor-pointer text-sky-50"
                         >
                             <option value="all" className="bg-[#1e1e1e] text-gray-300">Todos os SDRs</option>
-                            {sdrs.map(s => (
-                                <option key={s} value={s} className="bg-[#1e1e1e] text-gray-300">{s}</option>
+                            {sdrs.map((sdr) => (
+                                <option key={sdr.key} value={sdr.key} className="bg-[#1e1e1e] text-gray-300">{sdr.label}</option>
                             ))}
                         </select>
                         <Filter className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500 pointer-events-none" />
@@ -287,6 +562,93 @@ export default function Home() {
                         <ClientTable data={filteredData} onOpenModal={openModal} />
                     )}
                 </section>
+                    </>
+                ) : errorsLoading ? (
+                    <div className="flex justify-center items-center py-24 gap-3">
+                        <RefreshCcw className="animate-spin text-red-300 w-5 h-5" />
+                        <span className="text-gray-500 text-sm">Carregando dados de erros...</span>
+                    </div>
+                ) : errorsFetchError ? (
+                    <div className="glass-panel camo-panel rounded-xl p-8 border border-red-300/20 text-center">
+                        <AlertTriangle className="w-8 h-8 text-red-400 mx-auto mb-3" />
+                        <p className="text-sm text-red-200 font-semibold">Erro ao carregar dados da planilha</p>
+                        <p className="text-xs text-slate-400 mt-1 mb-4">{errorsFetchError}</p>
+                        <button
+                            onClick={fetchErrorsData}
+                            className="px-4 py-2 bg-red-500/20 hover:bg-red-500/30 text-red-100 border border-red-300/25 rounded-lg text-sm font-medium transition-colors"
+                        >
+                            Tentar novamente
+                        </button>
+                    </div>
+                ) : (
+                    <section className="glass-panel camo-panel rounded-xl p-5 md:p-6 border border-red-300/10">
+                        <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
+                            <div className="xl:col-span-2 space-y-4">
+                                <div>
+                                    <h2 className="impact-title text-3xl text-red-100">TOP Erros</h2>
+                                    <p className="text-xs text-slate-400 mt-1">Erros consolidados do período analisado</p>
+                                </div>
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                    {topErrors.map((item, idx) => (
+                                        <div key={`${item.erro}-${idx}`} className="rounded-xl border border-red-300/15 bg-red-500/5 p-4">
+                                            <div className="flex items-start justify-between gap-3">
+                                                <p className="text-sm text-red-50 font-semibold leading-relaxed">{item.erro}</p>
+                                                <span className="text-2xl font-bold text-red-100 shrink-0">{item.quantidade}</span>
+                                            </div>
+                                            <div className="text-xs text-slate-400 mt-2">Categoria: {item.categoria || "Geral"}</div>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+
+                            <div className="space-y-4">
+                                <div className="rounded-xl border border-sky-300/15 bg-sky-500/5 p-4">
+                                    <h3 className="text-sm font-semibold text-sky-200 mb-2">Insight</h3>
+                                    <p className="text-sm text-slate-300 leading-relaxed">{insightText}</p>
+                                </div>
+                                <div className="rounded-xl border border-white/10 bg-white/5 p-4">
+                                    <div className="text-xs text-slate-400">Data de referência</div>
+                                    <div className="text-lg font-semibold text-sky-100 mt-1">{errorsDate}</div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="mt-6">
+                            <h3 className="text-lg font-semibold text-sky-100 mb-3">Erros por SDR</h3>
+                            <div className="overflow-x-auto rounded-xl border border-white/10">
+                                <table className="w-full text-left text-sm">
+                                    <thead className="bg-secondary/40 text-xs uppercase text-slate-300 font-medium tracking-wider">
+                                        <tr>
+                                            <th className="px-4 py-3">SDR</th>
+                                            <th className="px-4 py-3">Total de Erros</th>
+                                            <th className="px-4 py-3">Top 3 Erros</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-sky-200/10">
+                                        {sdrErrorsRanking.map((item) => (
+                                            <tr key={item.nome} className="hover:bg-blue-500/10 transition-colors">
+                                                <td className="px-4 py-3 text-slate-100 font-semibold whitespace-nowrap">{item.nome}</td>
+                                                <td className="px-4 py-3 text-red-200 font-semibold whitespace-nowrap">{item.total}</td>
+                                                <td className="px-4 py-3 text-slate-300">
+                                                    <div className="flex flex-wrap gap-2">
+                                                        {item.erros.map((errorItem, index) => (
+                                                            <span
+                                                                key={`${item.nome}-${errorItem.erro}-${index}`}
+                                                                className="px-2 py-1 rounded-md bg-white/5 border border-white/10 text-xs"
+                                                            >
+                                                                {errorItem.erro} ({errorItem.quantidade})
+                                                            </span>
+                                                        ))}
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </section>
+                )}
             </div>
 
             {/* Modal */}
@@ -345,7 +707,7 @@ export default function Home() {
                             </button>
                         </div>
                         <div className="p-5 overflow-y-auto custom-scrollbar">
-                            {sdrRanking.length === 0 && sdrCallsRanking.length === 0 ? (
+                            {sdrRanking.length === 0 && sdrCallsRanking.length === 0 && sdrScoreRanking.length === 0 ? (
                                 <p className="text-sm text-gray-500">Sem dados para montar o ranking.</p>
                             ) : (
                                 <div className="space-y-6">
@@ -392,12 +754,117 @@ export default function Home() {
                                             ))}
                                         </div>
                                     </div>
+
+                                    <div>
+                                        <h4 className="text-sm font-semibold text-emerald-200 mb-2">Ranking por Nota Média</h4>
+                                        <div className="space-y-2">
+                                            {sdrScoreRanking.map((item, idx) => (
+                                                <div
+                                                    key={`score-${item.name}`}
+                                                    className="flex items-center justify-between bg-white/5 border border-white/5 rounded-lg px-4 py-2"
+                                                >
+                                                    <div className="flex items-center gap-3">
+                                                        <span className="w-7 h-7 rounded-full bg-emerald-500/25 text-emerald-200 text-xs font-bold flex items-center justify-center">
+                                                            {idx + 1}
+                                                        </span>
+                                                        <div>
+                                                            <span className="text-sm text-gray-200 font-medium block">{item.name}</span>
+                                                            <span className="text-xs text-slate-400">{item.scoredCalls} ligaç{item.scoredCalls === 1 ? "ão" : "ões"} com nota</span>
+                                                        </div>
+                                                    </div>
+                                                    <span className="text-sm text-emerald-200 font-semibold">
+                                                        {item.averageScore.toFixed(2)} / 10
+                                                    </span>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
                                 </div>
                             )}
                         </div>
                         <div className="p-4 border-t border-white/5 flex justify-end bg-white/5 rounded-b-xl shrink-0">
                             <button
                                 onClick={() => setRankingModalOpen(false)}
+                                className="px-4 py-2 bg-secondary/50 hover:bg-secondary text-white rounded-lg text-sm font-medium transition-colors border border-white/5"
+                            >
+                                Fechar
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {errorsModalOpen && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm">
+                    <div className="bg-[#0b1224] border border-red-300/20 rounded-xl max-w-3xl w-full max-h-[80vh] flex flex-col shadow-2xl">
+                        <div className="flex justify-between items-center p-5 border-b border-white/5 shrink-0">
+                            <div>
+                                <h3 className="impact-title text-3xl text-red-100">Erros Mais Recorrentes</h3>
+                                <p className="text-xs text-slate-400 mt-1">
+                                    Baseado nas {filteredData.length} ligações exibidas pelos filtros atuais
+                                </p>
+                            </div>
+                            <button
+                                onClick={() => setErrorsModalOpen(false)}
+                                className="text-gray-400 hover:text-white transition-colors"
+                            >
+                                <X size={20} />
+                            </button>
+                        </div>
+                        <div className="p-5 overflow-y-auto custom-scrollbar">
+                            {recurringCriticalErrors.length === 0 ? (
+                                <p className="text-sm text-gray-500">Nenhum erro crítico encontrado nas ligações filtradas.</p>
+                            ) : (
+                                <div className="space-y-3">
+                                    {recurringCriticalErrors.map((item, idx) => {
+                                        const visibleProspects = item.prospects.slice(0, 3);
+                                        const remainingProspects = item.prospects.length - visibleProspects.length;
+
+                                        return (
+                                            <div
+                                                key={item.key}
+                                                className="rounded-xl border border-red-300/15 bg-red-500/5 p-4"
+                                            >
+                                                <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-3">
+                                                    <div className="flex items-start gap-3 min-w-0">
+                                                        <span className="w-8 h-8 rounded-full bg-red-500/15 text-red-200 text-xs font-bold flex items-center justify-center shrink-0">
+                                                            {idx + 1}
+                                                        </span>
+                                                        <div className="min-w-0">
+                                                            <p className="text-sm font-semibold text-red-100 leading-relaxed">{item.label}</p>
+                                                            <div className="flex flex-wrap gap-2 mt-3">
+                                                                {visibleProspects.map((prospect) => (
+                                                                    <span
+                                                                        key={prospect}
+                                                                        className="px-2 py-1 rounded-md bg-white/5 border border-white/10 text-xs text-slate-300"
+                                                                    >
+                                                                        {prospect}
+                                                                    </span>
+                                                                ))}
+                                                                {remainingProspects > 0 && (
+                                                                    <span className="px-2 py-1 rounded-md bg-white/5 border border-white/10 text-xs text-slate-400">
+                                                                        +{remainingProspects} prospect{remainingProspects > 1 ? "s" : ""}
+                                                                    </span>
+                                                                )}
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                    <div className="text-left md:text-right shrink-0">
+                                                        <div className="text-2xl font-bold text-red-100">{item.count}</div>
+                                                        <div className="text-xs text-slate-400">
+                                                            {item.count === 1 ? "ocorrência" : "ocorrências"}
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            )}
+                        </div>
+                        <div className="p-4 border-t border-white/5 flex justify-end bg-white/5 rounded-b-xl shrink-0">
+                            <button
+                                onClick={() => setErrorsModalOpen(false)}
                                 className="px-4 py-2 bg-secondary/50 hover:bg-secondary text-white rounded-lg text-sm font-medium transition-colors border border-white/5"
                             >
                                 Fechar

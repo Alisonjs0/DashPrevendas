@@ -9,15 +9,29 @@ export async function GET(request) {
         return NextResponse.json({ error: 'URL parameter is required' }, { status: 400 });
     }
 
-    // Smart URL conversion: Try to convert sharing/edit URLs to CSV export URLs
+    // Smart URL conversion: convert sharing/edit URLs to CSV export URL and preserve gid.
     let fetchUrl = sheetUrl;
     if (sheetUrl.includes('docs.google.com/spreadsheets/d/')) {
         const match = sheetUrl.match(/\/d\/([a-zA-Z0-9-_]+)/);
         if (match && match[1]) {
             const sheetId = match[1];
-            // Check if it's already an export or pub link to avoid breaking valid ones
+
+            let gid = '';
+            try {
+                const parsedUrl = new URL(sheetUrl);
+                gid = parsedUrl.searchParams.get('gid') || '';
+                if (!gid && parsedUrl.hash) {
+                    const hashMatch = parsedUrl.hash.match(/gid=(\d+)/);
+                    if (hashMatch && hashMatch[1]) gid = hashMatch[1];
+                }
+            } catch {
+                const rawGidMatch = sheetUrl.match(/gid=(\d+)/);
+                if (rawGidMatch && rawGidMatch[1]) gid = rawGidMatch[1];
+            }
+
+            // Check if it's already an export or pub link to avoid breaking valid ones.
             if (!sheetUrl.includes('/pub') && !sheetUrl.includes('/export')) {
-                fetchUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv`;
+                fetchUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv${gid ? `&gid=${gid}` : ''}`;
             }
         }
     }
