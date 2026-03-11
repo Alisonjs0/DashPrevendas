@@ -506,14 +506,6 @@ export default function Home() {
 
                 <div className="flex justify-end gap-2 flex-wrap">
                     <button
-                        onClick={() => setErrorsModalOpen(true)}
-                        disabled={recurringCriticalErrors.length === 0}
-                        className="inline-flex items-center gap-2 px-4 py-2 bg-red-500/15 hover:bg-red-500/25 text-red-100 border border-red-300/25 rounded-lg transition-colors text-sm font-semibold glass-panel disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                        <AlertTriangle size={16} />
-                        Erros recorrentes
-                    </button>
-                    <button
                         onClick={() => setRankingModalOpen(true)}
                         className="px-4 py-2 bg-blue-500/20 hover:bg-blue-500/35 text-sky-100 border border-blue-300/35 rounded-lg transition-colors text-sm font-semibold glass-panel"
                     >
