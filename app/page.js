@@ -82,22 +82,29 @@ function parseJsonField(value) {
 
     if (!raw.startsWith('[') && !raw.startsWith('{')) return null;
 
-    try {
-        const parsed = JSON.parse(raw);
-        return Array.isArray(parsed) ? parsed : [parsed];
-    } catch {
-        // Last resort: try decoding HTML entities and retry
+    const attempts = [
+        raw,
+        raw.replace(/\\"/g, '"').replace(/\\\\/g, '\\'),
+        raw
+            .replace(/[\u201C\u201D\u201E\u201F\u00AB\u00BB]/g, '"')
+            .replace(/[\u2018\u2019\u201A\u201B]/g, "'"),
+        raw
+            .replace(/&quot;/g, '"')
+            .replace(/&#34;/g, '"')
+            .replace(/&#39;/g, "'")
+            .replace(/&amp;/g, '&'),
+    ];
+
+    for (const candidate of attempts) {
         try {
-            const decoded = raw
-                .replace(/&quot;/g, '"')
-                .replace(/&#39;/g, "'")
-                .replace(/&amp;/g, '&');
-            const parsed = JSON.parse(decoded);
+            const parsed = JSON.parse(candidate);
             return Array.isArray(parsed) ? parsed : [parsed];
         } catch {
-            return null;
+            // keep trying next normalization strategy
         }
     }
+
+    return null;
 }
 
 function cleanRichText(value) {
@@ -106,6 +113,73 @@ function cleanRichText(value) {
         .replace(/<[^>]+>/g, " ")
         .replace(/\s+/g, " ")
         .trim();
+}
+
+function parseListOrTextField(value) {
+    const parsed = parseJsonField(value);
+    if (parsed && parsed.length > 0) {
+        return parsed
+            .map((item) => cleanRichText(typeof item === "string" ? item : JSON.stringify(item)))
+            .filter(Boolean);
+    }
+
+    const raw = cleanRichText(value);
+    if (!raw) return [];
+    return [raw];
+}
+
+function decodeJsonStringValue(value) {
+    if (value === null || value === undefined) return "";
+    const raw = String(value);
+    try {
+        return JSON.parse(`"${raw.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`);
+    } catch {
+        return raw;
+    }
+}
+
+function parseChecklistField(value) {
+    const parsed = parseJsonField(value);
+    if (parsed && parsed.length > 0) return parsed;
+
+    const raw = String(value || "")
+        .replace(/""/g, '"')
+        .replace(/\\"/g, '"');
+
+    const itemRegex = /"item"\s*:\s*"((?:\\.|[^"\\])*)"\s*,\s*"concluido"\s*:\s*(true|false)\s*,\s*"status"\s*:\s*"((?:\\.|[^"\\])*)"/g;
+    const categoryRegex = /"categoria"\s*:\s*"((?:\\.|[^"\\])*)"/g;
+
+    const categories = [];
+    for (const match of raw.matchAll(categoryRegex)) {
+        categories.push(decodeJsonStringValue(match[1]));
+    }
+
+    const items = [];
+    for (const match of raw.matchAll(itemRegex)) {
+        items.push({
+            item: decodeJsonStringValue(match[1]),
+            concluido: match[2] === "true",
+            status: decodeJsonStringValue(match[3]),
+        });
+    }
+
+    if (items.length === 0) return null;
+
+    return [{
+        categoria: categories[0] || "Melhorias Identificadas",
+        itens: items,
+    }];
+}
+
+function formatChecklistItemText(value) {
+    return String(value || "")
+        .replace(/^\s*[*\-]\s*/, "")
+        .replace(/\s+/g, " ")
+        .trim();
+}
+
+function isChecklistSectionTitle(text) {
+    return /^\d+\.\s+/.test(text);
 }
 
 function normalizeText(value) {
@@ -139,6 +213,18 @@ function parseRowDate(value) {
     const isoParsed = new Date(raw);
     if (!Number.isNaN(isoParsed.getTime())) return isoParsed.getTime();
 
+    // Supports dd/mm/yyyy hh:mm and dd-mm-yyyy hh:mm
+    const dateTimeLocalMatch = raw.match(/^(\d{2})[-\/](\d{2})[-\/](\d{4})(?:\s+(\d{2}):(\d{2})(?::(\d{2}))?)?$/);
+    if (dateTimeLocalMatch) {
+        const day = Number(dateTimeLocalMatch[1]);
+        const month = Number(dateTimeLocalMatch[2]) - 1;
+        const year = Number(dateTimeLocalMatch[3]);
+        const hour = Number(dateTimeLocalMatch[4] || 0);
+        const minute = Number(dateTimeLocalMatch[5] || 0);
+        const second = Number(dateTimeLocalMatch[6] || 0);
+        return new Date(year, month, day, hour, minute, second).getTime();
+    }
+
     // Supports dd-mm-yyyy and dd/mm/yyyy from sheet exports
     const match = raw.match(/^(\d{2})[-\/](\d{2})[-\/](\d{4})$/);
     if (!match) return null;
@@ -166,6 +252,25 @@ function formatDateTime(value) {
                 second: "2-digit",
             });
         }
+    }
+
+    const localMatch = raw.match(/^(\d{2})[-\/](\d{2})[-\/](\d{4})(?:\s+(\d{2}):(\d{2})(?::(\d{2}))?)?$/);
+    if (localMatch) {
+        const day = Number(localMatch[1]);
+        const month = Number(localMatch[2]) - 1;
+        const year = Number(localMatch[3]);
+        const hour = Number(localMatch[4] || 0);
+        const minute = Number(localMatch[5] || 0);
+        const second = Number(localMatch[6] || 0);
+        const parsed = new Date(year, month, day, hour, minute, second);
+        return parsed.toLocaleString("pt-BR", {
+            day: "2-digit",
+            month: "2-digit",
+            year: "numeric",
+            hour: "2-digit",
+            minute: "2-digit",
+            second: "2-digit",
+        });
     }
 
     return raw;
@@ -904,9 +1009,9 @@ export default function Home() {
                         {/* Modal Header */}
                         <div className="flex justify-between items-start p-6 border-b border-white/5 shrink-0">
                             <div>
-                                <h3 className="impact-title text-3xl text-sky-100 leading-none">{modalRow["Prospect / Empressa"]}</h3>
+                                <h3 className="impact-title text-3xl text-sky-100 leading-none">{normalizeText(modalRow["Prospect / Empressa"] || "") || "Prospect não informado"}</h3>
                                 <div className="flex gap-3 mt-1 text-xs text-gray-400">
-                                    <span>SDR: <span className="text-gray-200">{modalRow["SDR / Pré-venda"]}</span></span>
+                                    <span>SDR: <span className="text-gray-200">{normalizeText(modalRow["SDR / Pré-venda"] || "")}</span></span>
                                     <span className="text-gray-600">•</span>
                                     <span>Data: <span className="text-gray-200">{formatDateTime(modalRow["Data"])}</span></span>
                                 </div>
@@ -967,7 +1072,7 @@ export default function Home() {
 
                             {/* Dores Identificadas */}
                             {(() => {
-                                const dores = parseJsonField(modalRow["Dores Identificadas"]);
+                                const dores = parseListOrTextField(modalRow["Dores Identificadas"]);
                                 if (!dores || dores.length === 0) return null;
                                 return (
                                     <div>
@@ -986,7 +1091,7 @@ export default function Home() {
 
                             {/* Erros Críticos */}
                             {(() => {
-                                const erros = parseJsonField(modalRow["Erros Criticos"]);
+                                const erros = parseListOrTextField(modalRow["Erros Criticos"]);
                                 if (!erros || erros.length === 0) return null;
                                 return (
                                     <div>
@@ -1005,21 +1110,47 @@ export default function Home() {
 
                             {/* Checklist de Melhoria */}
                             {(() => {
-                                const checklist = parseJsonField(modalRow["Checklist de Melhoria"]);
-                                if (!checklist || checklist.length === 0) return null;
+                                const checklist = parseChecklistField(modalRow["Checklist de Melhoria"]);
+                                const checklistFallback = cleanRichText(modalRow["Checklist de Melhoria"]);
+                                const looksLikeBrokenJson = /^\s*[\[{].*[:\]}]\s*$/.test(checklistFallback);
+                                if ((!checklist || checklist.length === 0) && (!checklistFallback || looksLikeBrokenJson)) return null;
+
+                                if (!checklist || checklist.length === 0) {
+                                    return (
+                                        <div>
+                                            <h4 className="text-sm font-semibold text-gray-300 mb-2">Checklist de Melhoria</h4>
+                                            <p className="text-sm text-gray-400 bg-white/5 rounded-lg p-3 leading-relaxed">{checklistFallback}</p>
+                                        </div>
+                                    );
+                                }
+
                                 return (
                                     <div>
                                         <h4 className="text-sm font-semibold text-gray-300 mb-2">Checklist de Melhoria</h4>
                                         {checklist.map((cat, cidx) => (
-                                            <div key={cidx} className="mb-3">
-                                                <div className="text-xs font-semibold text-sky-300 uppercase tracking-wider mb-1">{cat.categoria}</div>
-                                                <ul className="space-y-1">
+                                            <div key={cidx} className="mb-4 rounded-xl border border-white/10 bg-white/5 p-3">
+                                                <div className="text-xs font-semibold text-sky-300 uppercase tracking-wider mb-2">{cat.categoria}</div>
+                                                <ul className="space-y-2">
                                                     {(cat.itens || []).map((item, iidx) => (
-                                                        <li key={iidx} className="flex items-start gap-2 text-sm">
-                                                            <span className={item.concluido ? "text-sky-300" : "text-blue-300"}>
-                                                                {item.concluido ? "✓" : "○"}
-                                                            </span>
-                                                            <span className={item.concluido ? "text-gray-300" : "text-gray-400"}>{item.item}</span>
+                                                        <li key={iidx} className="rounded-lg border border-white/10 bg-[#101a35]/55 p-2.5">
+                                                            <div className="flex items-start gap-2 text-sm">
+                                                                <span className={`mt-0.5 ${item.concluido ? "text-emerald-300" : "text-amber-300"}`}>
+                                                                    {item.concluido ? "✓" : "○"}
+                                                                </span>
+                                                                <div className="min-w-0">
+                                                                    <p className={`${isChecklistSectionTitle(formatChecklistItemText(item.item)) ? "text-sky-200 font-semibold" : item.concluido ? "text-gray-300" : "text-gray-400"} leading-relaxed`}>
+                                                                        {formatChecklistItemText(item.item)}
+                                                                    </p>
+                                                                    {item.status && (
+                                                                        <span className={`inline-flex mt-2 px-2 py-0.5 rounded-md text-[11px] border ${item.concluido
+                                                                            ? "bg-emerald-500/12 text-emerald-200 border-emerald-400/25"
+                                                                            : "bg-amber-500/10 text-amber-200 border-amber-400/25"
+                                                                            }`}>
+                                                                            {item.status}
+                                                                        </span>
+                                                                    )}
+                                                                </div>
+                                                            </div>
                                                         </li>
                                                     ))}
                                                 </ul>

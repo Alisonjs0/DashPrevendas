@@ -4,6 +4,13 @@ import { ExternalLink } from "lucide-react";
 
 const SCORE_KEYS = ["Conexão/Rapport", "Apres. Autoridade", "Entendimento Dores", "Apres. Solução", "Agendamento"];
 
+function normalizeDisplay(value) {
+    return String(value || "")
+        .replace(/[_-]+/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+}
+
 function formatDateTime(value) {
     if (!value) return "—";
     const raw = String(value).trim();
@@ -21,6 +28,24 @@ function formatDateTime(value) {
                 second: "2-digit",
             });
         }
+    }
+
+    const localMatch = raw.match(/^(\d{2})[-\/](\d{2})[-\/](\d{4})(?:\s+(\d{2}):(\d{2})(?::(\d{2}))?)?$/);
+    if (localMatch) {
+        const day = Number(localMatch[1]);
+        const month = Number(localMatch[2]) - 1;
+        const year = Number(localMatch[3]);
+        const hour = Number(localMatch[4] || 0);
+        const minute = Number(localMatch[5] || 0);
+        const second = Number(localMatch[6] || 0);
+        const parsed = new Date(year, month, day, hour, minute, second);
+        return parsed.toLocaleString("pt-BR", {
+            day: "2-digit",
+            month: "2-digit",
+            year: "numeric",
+            hour: "2-digit",
+            minute: "2-digit",
+        });
     }
 
     return raw;
@@ -97,10 +122,10 @@ export default function ClientTable({ data, onOpenModal }) {
                                     {formatDateTime(row["Data"])}
                                 </td>
                                 <td className="px-4 py-4 font-semibold text-sky-50 group-hover:text-sky-200 transition-colors">
-                                    {row["Prospect / Empressa"]}
+                                    {normalizeDisplay(row["Prospect / Empressa"]) || "—"}
                                 </td>
                                 <td className="px-4 py-4 text-slate-200 text-sm">
-                                    {row["SDR / Pré-venda"]}
+                                    {normalizeDisplay(row["SDR / Pré-venda"]) || "—"}
                                 </td>
                                 <td className="px-4 py-4">
                                     {getMeetingBadge(row["Reunião Marcada?"])}
