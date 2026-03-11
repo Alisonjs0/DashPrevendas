@@ -181,6 +181,7 @@ export default function Home() {
     const [errorsData, setErrorsData] = useState([]);
     const [errorsLoading, setErrorsLoading] = useState(true);
     const [errorsFetchError, setErrorsFetchError] = useState(null);
+    const [errorsLastUpdated, setErrorsLastUpdated] = useState(null);
     const [loading, setLoading] = useState(false);
     const [lastUpdated, setLastUpdated] = useState(null);
     const [sheetUrl, setSheetUrl] = useState(DEFAULT_SHEET_URL);
@@ -235,6 +236,7 @@ export default function Home() {
                 setErrorsFetchError(jsonData.error);
             } else {
                 setErrorsData(Array.isArray(jsonData.data) ? jsonData.data : []);
+                setErrorsLastUpdated(new Date());
             }
         } catch (error) {
             console.error("Failed to fetch errors data", error);
@@ -439,20 +441,33 @@ export default function Home() {
                         </p>
                     </div>
                     <div className="flex items-center gap-2">
-                        <button
-                            onClick={() => setSheetModalOpen(true)}
-                            className="px-4 py-2 bg-blue-500/20 hover:bg-blue-500/35 text-sky-100 border border-blue-300/35 rounded-lg transition-colors text-sm font-semibold glass-panel danger-glow"
-                        >
-                            Conectar Planilha
-                        </button>
-                        <button
-                            onClick={() => fetchData(sheetUrl)}
-                            disabled={!sheetUrl || loading}
-                            className="flex items-center gap-2 px-4 py-2 bg-cyan-500/20 hover:bg-cyan-500/35 text-cyan-100 border border-cyan-300/35 rounded-lg transition-colors text-sm font-semibold glass-panel disabled:opacity-50 disabled:cursor-not-allowed"
-                        >
-                            <RefreshCcw size={16} className={loading ? "animate-spin" : ""} />
-                            Atualizar
-                        </button>
+                        {activeTab === "dashboard" ? (
+                            <>
+                                <button
+                                    onClick={() => setSheetModalOpen(true)}
+                                    className="px-4 py-2 bg-blue-500/20 hover:bg-blue-500/35 text-sky-100 border border-blue-300/35 rounded-lg transition-colors text-sm font-semibold glass-panel danger-glow"
+                                >
+                                    Conectar Planilha
+                                </button>
+                                <button
+                                    onClick={() => fetchData(sheetUrl)}
+                                    disabled={!sheetUrl || loading}
+                                    className="flex items-center gap-2 px-4 py-2 bg-cyan-500/20 hover:bg-cyan-500/35 text-cyan-100 border border-cyan-300/35 rounded-lg transition-colors text-sm font-semibold glass-panel disabled:opacity-50 disabled:cursor-not-allowed"
+                                >
+                                    <RefreshCcw size={16} className={loading ? "animate-spin" : ""} />
+                                    Atualizar
+                                </button>
+                            </>
+                        ) : (
+                            <button
+                                onClick={fetchErrorsData}
+                                disabled={errorsLoading}
+                                className="flex items-center gap-2 px-4 py-2 bg-red-500/15 hover:bg-red-500/25 text-red-100 border border-red-300/25 rounded-lg transition-colors text-sm font-semibold glass-panel disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                                <RefreshCcw size={16} className={errorsLoading ? "animate-spin" : ""} />
+                                Atualizar
+                            </button>
+                        )}
                     </div>
                 </header>
 
@@ -582,6 +597,22 @@ export default function Home() {
                     </div>
                 ) : (
                     <section className="glass-panel camo-panel rounded-xl p-5 md:p-6 border border-red-300/10">
+                        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-5 pb-5 border-b border-white/5">
+                            <div className="flex items-center gap-2">
+                                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/15 border border-emerald-400/30 text-xs font-semibold text-emerald-200">
+                                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                                    Conectado
+                                </span>
+                                <span className="text-xs text-slate-400 break-all">
+                                    planilha <span className="text-slate-300 font-medium">Principais Erros</span>
+                                </span>
+                            </div>
+                            <div className="text-xs text-gray-500">
+                                {errorsLastUpdated
+                                    ? `Atualizado às ${errorsLastUpdated.toLocaleTimeString("pt-BR")}`
+                                    : "Sincronizando..."}
+                            </div>
+                        </div>
                         <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
                             <div className="xl:col-span-2 space-y-4">
                                 <div>
