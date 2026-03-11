@@ -1,0 +1,32 @@
+[
+    {
+        "Cliente": "Empresa ABC",
+        "Satisfação": "Positivo",
+        "Última mensagem": "Tudo certo com o projeto",
+        "Tarefas": "Concluídas",
+        "Resumo": "Projeto entregue no prazo, cliente satisfeito.",
+        "Última atualização": "10:30",
+        "Squad": "Falcon",
+        "Historico": "[{\"data\": \"2024-02-10\", \"tarefa\": \"Kickoff\", \"status\": \"Concluído\"}, {\"data\": \"2024-02-15\", \"tarefa\": \"Entrega Fase 1\", \"status\": \"Concluído\"}]"
+    },
+    {
+        "Cliente": "Tech Solutions",
+        "Satisfação": "Risco",
+        "Última mensagem": "Aguardando resposta sobre orçamento",
+        "Tarefas": "Pendente",
+        "Resumo": "Cliente reclamou da demora no orçamento.",
+        "Última atualização": "09:15",
+        "Squad": "Argonautas",
+        "Historico": "[{\"data\": \"2024-02-12\", \"tarefa\": \"Envio de Orçamento\", \"status\": \"Pendente\"}, {\"data\": \"2024-02-14\", \"tarefa\": \"Follow-up\", \"status\": \"Atrasado\"}]"
+    },
+    {
+        "Cliente": "Global Imports",
+        "Satisfação": "Normal",
+        "Última mensagem": "Reunião agendada para sexta",
+        "Tarefas": "Em andamento",
+        "Resumo": "Alinhamento de expectativas para próxima fase.",
+        "Última atualização": "11:45",
+        "Squad": "Falcon",
+        "Historico": null
+    }
+]
