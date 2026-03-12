@@ -1,13 +1,13 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import DashboardStats from "@/components/DashboardStats";
 import SatisfactionChart from "@/components/SatisfactionChart";
 import ClientTable from "@/components/ClientTable";
-import { RefreshCcw, Search, Filter, X, ExternalLink, AlertTriangle } from "lucide-react";
+import { RefreshCcw, Search, Filter, X, ExternalLink, AlertTriangle, CalendarRange, Users, PhoneCall, Eraser, Phone, CalendarCheck, TrendingUp, ChevronDown, ChevronUp } from "lucide-react";
 
 const DEFAULT_SHEET_URL = "https://docs.google.com/spreadsheets/d/1JhnWKiaCp-1sLx04vn4HKMiNMvSxgFu3rqvrBHUcJAU/edit?gid=0#gid=0";
 const ERRORS_SHEET_URL = "https://docs.google.com/spreadsheets/d/1JhnWKiaCp-1sLx04vn4HKMiNMvSxgFu3rqvrBHUcJAU/edit?gid=1068236709#gid=1068236709";
+const VOICEMAIL_SHEET_URL = "https://docs.google.com/spreadsheets/d/1QbW0-S73PVoEW8lIO_JyLFfdJuP9Z6m-pCujXpPqUDo/edit?gid=0#gid=0";
 const SCORE_KEYS = ["Conexão/Rapport", "Apres. Autoridade", "Entendimento Dores", "Apres. Solução", "Agendamento"];
 const FALLBACK_TOP_ERRORS = [
     { erro: "Identificação incorreta do prospect", quantidade: 47, categoria: "Geral" },
@@ -198,9 +198,59 @@ function getSdrKey(value) {
     return getSdrLabel(value).toLocaleLowerCase("pt-BR");
 }
 
+function buildDateKey(year, month, day) {
+    const yyyy = String(year);
+    const mm = String(month).padStart(2, "0");
+    const dd = String(day).padStart(2, "0");
+    return `${yyyy}-${mm}-${dd}`;
+}
+
+function toLocalDateKey(date) {
+    return buildDateKey(date.getFullYear(), date.getMonth() + 1, date.getDate());
+}
+
+function parseRowDateKey(value) {
+    if (!value || typeof value !== "string") return null;
+    const raw = value.trim();
+
+    const localMatch = raw.match(/^(\d{1,2})[-\/](\d{1,2})[-\/](\d{4})(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?)?$/);
+    if (localMatch) {
+        const day = Number(localMatch[1]);
+        const month = Number(localMatch[2]);
+        const year = Number(localMatch[3]);
+        return buildDateKey(year, month, day);
+    }
+
+    const dateTimeMatch = raw.match(/^\[DateTime:\s*(.+)\]$/);
+    const normalizedRaw = dateTimeMatch && dateTimeMatch[1] ? dateTimeMatch[1].trim() : raw;
+
+    const isoDatePrefixMatch = normalizedRaw.match(/^(\d{4})-(\d{2})-(\d{2})(?:$|[T\s].*)/);
+    if (isoDatePrefixMatch) {
+        const year = Number(isoDatePrefixMatch[1]);
+        const month = Number(isoDatePrefixMatch[2]);
+        const day = Number(isoDatePrefixMatch[3]);
+        return buildDateKey(year, month, day);
+    }
+
+    const parsed = new Date(normalizedRaw);
+    if (!Number.isNaN(parsed.getTime())) {
+        return toLocalDateKey(parsed);
+    }
+
+    return null;
+}
+
 function parseRowDate(value) {
     if (!value || typeof value !== "string") return null;
     const raw = value.trim();
+
+    const isoDateOnlyMatch = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (isoDateOnlyMatch) {
+        const year = Number(isoDateOnlyMatch[1]);
+        const month = Number(isoDateOnlyMatch[2]) - 1;
+        const day = Number(isoDateOnlyMatch[3]);
+        return new Date(year, month, day).getTime();
+    }
 
     // Supports values like [DateTime: 2026-03-11T10:53:12.118-03:00]
     const dateTimeMatch = raw.match(/^\[DateTime:\s*(.+)\]$/);
@@ -214,7 +264,7 @@ function parseRowDate(value) {
     if (!Number.isNaN(isoParsed.getTime())) return isoParsed.getTime();
 
     // Supports dd/mm/yyyy hh:mm and dd-mm-yyyy hh:mm
-    const dateTimeLocalMatch = raw.match(/^(\d{2})[-\/](\d{2})[-\/](\d{4})(?:\s+(\d{2}):(\d{2})(?::(\d{2}))?)?$/);
+    const dateTimeLocalMatch = raw.match(/^(\d{1,2})[-\/](\d{1,2})[-\/](\d{4})(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?)?$/);
     if (dateTimeLocalMatch) {
         const day = Number(dateTimeLocalMatch[1]);
         const month = Number(dateTimeLocalMatch[2]) - 1;
@@ -226,7 +276,7 @@ function parseRowDate(value) {
     }
 
     // Supports dd-mm-yyyy and dd/mm/yyyy from sheet exports
-    const match = raw.match(/^(\d{2})[-\/](\d{2})[-\/](\d{4})$/);
+    const match = raw.match(/^(\d{1,2})[-\/](\d{1,2})[-\/](\d{4})$/);
     if (!match) return null;
 
     const day = Number(match[1]);
@@ -254,7 +304,7 @@ function formatDateTime(value) {
         }
     }
 
-    const localMatch = raw.match(/^(\d{2})[-\/](\d{2})[-\/](\d{4})(?:\s+(\d{2}):(\d{2})(?::(\d{2}))?)?$/);
+    const localMatch = raw.match(/^(\d{1,2})[-\/](\d{1,2})[-\/](\d{4})(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?)?$/);
     if (localMatch) {
         const day = Number(localMatch[1]);
         const month = Number(localMatch[2]) - 1;
@@ -281,12 +331,95 @@ function isMeetingScheduled(value) {
     return meeting === "TRUE" || meeting === "SIM" || meeting === "YES";
 }
 
+function normalizeForComparison(value) {
+    return String(value || "")
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-zA-Z0-9]+/g, " ")
+        .toLowerCase()
+    .replace(/\s+/g, " ")
+        .trim();
+}
+
+function isErrorLikeValue(value) {
+    const normalized = normalizeForComparison(value);
+    if (!normalized) return false;
+    if (normalized.includes("sem erro") || normalized.includes("sem falha")) return false;
+
+    const errorKeywords = [
+        "erro",
+        "falha",
+        "caixa postal",
+        "nao atendeu",
+        "não atendeu",
+        "sem sucesso",
+        "ocupado",
+        "invalido",
+        "inválido",
+        "cancelado",
+    ];
+
+    return errorKeywords.some((keyword) => normalized.includes(normalizeForComparison(keyword)));
+}
+
+function computeVoicemailStats(rows) {
+    let totalAttempts = 0;
+    let errorAttempts = 0;
+    let rowsWithError = 0;
+
+    rows.forEach((row) => {
+        const entries = Object.entries(row || {});
+
+        const statusEntry = entries.find(([key]) => {
+            const keyNorm = normalizeForComparison(key);
+            return (
+                keyNorm.includes("status") ||
+                keyNorm.includes("resultado") ||
+                keyNorm.includes("motivo") ||
+                keyNorm.includes("erro")
+            );
+        });
+        const durationEntry = entries.find(([key]) => {
+            const keyNorm = normalizeForComparison(key);
+            return (
+                keyNorm.includes("duracao") ||
+                keyNorm.includes("duração") ||
+                keyNorm.includes("duration") ||
+                keyNorm.includes("tempo")
+            );
+        });
+
+        const statusValue = statusEntry ? statusEntry[1] : "";
+        const durationValue = durationEntry ? durationEntry[1] : "";
+
+        const hasAttempt = Boolean(String(statusValue || "").trim() || String(durationValue || "").trim());
+        const hasError = isErrorLikeValue(statusValue);
+
+        const rowAttemptCount = hasAttempt ? 1 : 0;
+        const rowErrorCount = hasError ? 1 : 0;
+
+        totalAttempts += rowAttemptCount;
+        errorAttempts += rowErrorCount;
+        if (rowErrorCount > 0) rowsWithError += 1;
+    });
+
+    return {
+        totalRows: rows.length,
+        totalAttempts,
+        errorAttempts,
+        rowsWithError,
+    };
+}
+
 export default function Home() {
     const [data, setData] = useState([]);
     const [errorsData, setErrorsData] = useState([]);
     const [errorsLoading, setErrorsLoading] = useState(true);
     const [errorsFetchError, setErrorsFetchError] = useState(null);
     const [errorsLastUpdated, setErrorsLastUpdated] = useState(null);
+    const [voicemailRows, setVoicemailRows] = useState([]);
+    const [voicemailLoading, setVoicemailLoading] = useState(true);
+    const [voicemailAccessError, setVoicemailAccessError] = useState(null);
     const [loading, setLoading] = useState(false);
     const [lastUpdated, setLastUpdated] = useState(null);
     const [sheetUrl, setSheetUrl] = useState(DEFAULT_SHEET_URL);
@@ -300,6 +433,87 @@ export default function Home() {
     const [searchTerm, setSearchTerm] = useState("");
     const [sdrFilter, setSdrFilter] = useState("all");
     const [meetingFilter, setMeetingFilter] = useState("all");
+    const [startDateFilter, setStartDateFilter] = useState("");
+    const [endDateFilter, setEndDateFilter] = useState("");
+    const [datePreset, setDatePreset] = useState("none");
+    const [filtersOpen, setFiltersOpen] = useState(false);
+    // Principais Erros day filter
+    const [mainErrorsDay, setMainErrorsDay] = useState("");
+
+    const hasActiveFilters =
+        searchTerm.trim() !== "" ||
+        sdrFilter !== "all" ||
+        meetingFilter !== "all" ||
+        startDateFilter !== "" ||
+        endDateFilter !== "";
+
+    const clearFilters = () => {
+        setSearchTerm("");
+        setSdrFilter("all");
+        setMeetingFilter("all");
+        setStartDateFilter("");
+        setEndDateFilter("");
+        setDatePreset("none");
+    };
+
+    function formatDateForInput(date) {
+        const year = date.getFullYear();
+        const month = String(date.getMonth() + 1).padStart(2, "0");
+        const day = String(date.getDate()).padStart(2, "0");
+        return `${year}-${month}-${day}`;
+    }
+
+    function getCurrentWeekStart(referenceDate) {
+        const start = new Date(referenceDate);
+        const day = start.getDay();
+        const diff = day === 0 ? -6 : 1 - day;
+        start.setDate(start.getDate() + diff);
+        start.setHours(0, 0, 0, 0);
+        return start;
+    }
+
+    function applyDatePreset(preset) {
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+
+        if (preset === "today") {
+            const formatted = formatDateForInput(today);
+            setStartDateFilter(formatted);
+            setEndDateFilter(formatted);
+            setDatePreset("today");
+            return;
+        }
+
+        if (preset === "yesterday") {
+            const yesterday = new Date(today);
+            yesterday.setDate(yesterday.getDate() - 1);
+            const formatted = formatDateForInput(yesterday);
+            setStartDateFilter(formatted);
+            setEndDateFilter(formatted);
+            setDatePreset("yesterday");
+            return;
+        }
+
+        if (preset === "this-week") {
+            const weekStart = getCurrentWeekStart(today);
+            setStartDateFilter(formatDateForInput(weekStart));
+            setEndDateFilter(formatDateForInput(today));
+            setDatePreset("this-week");
+            return;
+        }
+
+        setDatePreset("none");
+    }
+
+    function handleStartDateChange(value) {
+        setStartDateFilter(value);
+        setDatePreset("none");
+    }
+
+    function handleEndDateChange(value) {
+        setEndDateFilter(value);
+        setDatePreset("none");
+    }
 
     // Modal State
     const [modalOpen, setModalOpen] = useState(false);
@@ -351,6 +565,37 @@ export default function Home() {
         }
     };
 
+    const fetchVoicemailCount = async () => {
+        setVoicemailLoading(true);
+        try {
+            const res = await fetch(`/api/sheets?url=${encodeURIComponent(VOICEMAIL_SHEET_URL)}`);
+            const jsonData = await res.json();
+            if (res.status === 401 || res.status === 403) {
+                setVoicemailAccessError("A planilha de caixa postal exige acesso. Publique como 'Qualquer pessoa com o link' para contabilizar automaticamente.");
+                setVoicemailRows([]);
+                return "unauthorized";
+            }
+
+            if (!res.ok || jsonData.error) {
+                console.error("Voicemail sheet API Error:", jsonData.error);
+                setVoicemailAccessError("Não foi possível acessar a planilha de caixa postal no momento.");
+                setVoicemailRows([]);
+            } else {
+                const rows = Array.isArray(jsonData.data) ? jsonData.data : [];
+                setVoicemailRows(rows);
+                setVoicemailAccessError(null);
+            }
+        } catch (error) {
+            console.error("Failed to fetch voicemail count", error);
+            setVoicemailAccessError("Falha de conexão ao buscar a planilha de caixa postal.");
+            setVoicemailRows([]);
+        } finally {
+            setVoicemailLoading(false);
+        }
+
+        return "ok";
+    };
+
     const handleLoadSheet = () => {
         if (!sheetInputValue.trim()) return;
         setSheetUrl(sheetInputValue.trim());
@@ -371,11 +616,27 @@ export default function Home() {
         return () => clearInterval(interval);
     }, []);
 
+    useEffect(() => {
+        let interval;
+
+        const loadVoicemail = async () => {
+            const result = await fetchVoicemailCount();
+            if (result === "unauthorized" && interval) {
+                clearInterval(interval);
+            }
+        };
+
+        loadVoicemail();
+        interval = setInterval(loadVoicemail, 30000);
+        return () => clearInterval(interval);
+    }, []);
+
     // Derived State: Filtered Data
     const filteredData = data.filter(item => {
         const prospect = (item["Prospect / Empressa"] || "").toLowerCase();
         const sdrKey = getSdrKey(item["SDR / Pré-venda"]);
         const isScheduled = isMeetingScheduled(item["Reunião Marcada?"]);
+        const rowDateKey = parseRowDateKey(item["Data"]);
 
         const matchesSearch = prospect.includes(searchTerm.toLowerCase());
         const matchesSdr = sdrFilter === "all" || sdrKey === sdrFilter;
@@ -383,8 +644,10 @@ export default function Home() {
             meetingFilter === "all" ||
             (meetingFilter === "yes" && isScheduled) ||
             (meetingFilter === "no" && !isScheduled);
+        const matchesStartDate = !startDateFilter || (rowDateKey !== null && rowDateKey >= startDateFilter);
+        const matchesEndDate = !endDateFilter || (rowDateKey !== null && rowDateKey <= endDateFilter);
 
-        return matchesSearch && matchesSdr && matchesMeeting;
+        return matchesSearch && matchesSdr && matchesMeeting && matchesStartDate && matchesEndDate;
     }).sort((a, b) => {
         const dateA = parseRowDate(a["Data"]);
         const dateB = parseRowDate(b["Data"]);
@@ -395,6 +658,76 @@ export default function Home() {
         if (dateB === null) return -1;
         return dateB - dateA;
     });
+
+    function getRowValueByCandidates(row, candidates) {
+        if (!row) return "";
+        const entries = Object.entries(row);
+
+        for (const candidate of candidates) {
+            const candidateNorm = normalizeForComparison(candidate);
+            const exact = entries.find(([key]) => normalizeForComparison(key) === candidateNorm);
+            if (exact && String(exact[1] || "").trim()) return String(exact[1]);
+        }
+
+        for (const candidate of candidates) {
+            const candidateNorm = normalizeForComparison(candidate);
+            const partial = entries.find(([key]) => normalizeForComparison(key).includes(candidateNorm));
+            if (partial && String(partial[1] || "").trim()) return String(partial[1]);
+        }
+
+        return "";
+    }
+
+    const filteredVoicemailRows = voicemailRows.filter((row) => {
+        const prospectValue = getRowValueByCandidates(row, [
+            "Prospect / Empressa",
+            "Prospect",
+            "Empresa",
+            "Cliente",
+            "Lead",
+            "Nome",
+        ]);
+        const sdrValue = getRowValueByCandidates(row, [
+            "SDR / Pré-venda",
+            "SDR",
+            "Pré-venda",
+            "Pre-venda",
+            "Responsável",
+        ]);
+        const meetingValue = getRowValueByCandidates(row, [
+            "Reunião Marcada?",
+            "Reuniao Marcada?",
+            "Reunião",
+            "Status da ligação",
+            "Status Ligação",
+            "Status Ligacao",
+        ]);
+        const dateValue = getRowValueByCandidates(row, [
+            "Data",
+            "Data da Tentativa",
+            "Data Tentativa",
+            "Data/Hora",
+            "Data Hora",
+        ]);
+
+        const prospect = prospectValue.toLowerCase();
+        const sdrKey = getSdrKey(sdrValue);
+        const isScheduled = isMeetingScheduled(meetingValue);
+        const rowDateKey = parseRowDateKey(dateValue);
+
+        const matchesSearch = prospect.includes(searchTerm.toLowerCase());
+        const matchesSdr = sdrFilter === "all" || sdrKey === sdrFilter;
+        const matchesMeeting =
+            meetingFilter === "all" ||
+            (meetingFilter === "yes" && isScheduled) ||
+            (meetingFilter === "no" && !isScheduled);
+        const matchesStartDate = !startDateFilter || (rowDateKey !== null && rowDateKey >= startDateFilter);
+        const matchesEndDate = !endDateFilter || (rowDateKey !== null && rowDateKey <= endDateFilter);
+
+        return matchesSearch && matchesSdr && matchesMeeting && matchesStartDate && matchesEndDate;
+    });
+
+    const voicemailFilteredStats = computeVoicemailStats(filteredVoicemailRows);
 
     // Unique SDRs for Filter Dropdown
     const sdrs = Object.values(
@@ -497,38 +830,102 @@ export default function Home() {
         }, {})
     ).sort((a, b) => b.count - a.count || a.label.localeCompare(b.label, "pt-BR"));
 
-    // Flexible column lookup: find any key that matches (case-insensitive, trimmed)
+    // Flexible column lookup: resilient to typos/spaces/underscores in sheet headers.
     function getErrCol(row, ...candidates) {
         if (!row) return undefined;
         const keys = Object.keys(row);
+
         for (const candidate of candidates) {
-            const norm = candidate.trim().toLocaleLowerCase("pt-BR");
-            const match = keys.find((k) => k.trim().toLocaleLowerCase("pt-BR") === norm);
-            if (match !== undefined) return row[match];
+            const norm = normalizeForComparison(candidate);
+            const exact = keys.find((k) => normalizeForComparison(k) === norm);
+            if (exact !== undefined) return row[exact];
         }
+
+        for (const candidate of candidates) {
+            const norm = normalizeForComparison(candidate);
+            const partial = keys.find((k) => {
+                const keyNorm = normalizeForComparison(k);
+                return keyNorm.includes(norm) || norm.includes(keyNorm);
+            });
+            if (partial !== undefined) return row[partial];
+        }
+
         return undefined;
     }
 
-    const mainErrorsRow = errorsData.find((row) =>
-        getErrCol(row, "TOP ERROS", "TOP_ERROS") ||
-        getErrCol(row, "ERROS SDRs", "ERROS_SDRS", "ERROS SDRS") ||
-        getErrCol(row, "INSIGTH", "INSIGHT", "INSIGHTS") ||
-        getErrCol(row, "DATA")
-    );
+    function hasMainErrorsPayload(row) {
+        return Boolean(
+            getErrCol(row, "TOP ERROS", "TOP_ERROS") ||
+            getErrCol(row, "ERROS SDRs", "ERROS_SDRS", "ERROS SDRS") ||
+            getErrCol(row, "INSIGTH", "INSIGHT", "INSIGHTS") ||
+            getErrCol(row, "DATA")
+        );
+    }
+
+    const errorsRowsWithPayload = errorsData.filter(hasMainErrorsPayload);
+
+    // Filter Principais Erros by selected day
+    let mainErrorsRow = null;
+    if (mainErrorsDay) {
+        mainErrorsRow = errorsRowsWithPayload.find(row => {
+            const rowDate = String(getErrCol(row, "DATA") || "").slice(0, 10);
+            return rowDate === mainErrorsDay;
+        }) || null;
+    }
+    if (!mainErrorsRow) {
+        // fallback to latest
+        mainErrorsRow = errorsRowsWithPayload.reduce((latestRow, currentRow) => {
+            if (!latestRow) return currentRow;
+            const latestDate = parseRowDate(String(getErrCol(latestRow, "DATA") || ""));
+            const currentDate = parseRowDate(String(getErrCol(currentRow, "DATA") || ""));
+            if (latestDate === null && currentDate === null) return currentRow;
+            if (latestDate === null) return currentRow;
+            if (currentDate === null) return latestRow;
+            return currentDate >= latestDate ? currentRow : latestRow;
+        }, null);
+    }
 
     const topErrors = parseJsonField(getErrCol(mainErrorsRow, "TOP ERROS", "TOP_ERROS")) || FALLBACK_TOP_ERRORS;
     const sdrErrors = parseJsonField(getErrCol(mainErrorsRow, "ERROS SDRs", "ERROS_SDRS", "ERROS SDRS")) || FALLBACK_SDR_ERRORS;
     const insightText = String(getErrCol(mainErrorsRow, "INSIGTH", "INSIGHT", "INSIGHTS") || FALLBACK_INSIGHT).trim();
     const errorsDate = String(getErrCol(mainErrorsRow, "DATA") || FALLBACK_ERRORS_DATE).trim();
 
+    function isSdrErrorsInstructionRow(name) {
+        const normalized = normalizeForComparison(name);
+        if (!normalized) return true;
+
+        return (
+            normalized === normalizeForComparison("Top 3 Erros") ||
+            normalized.includes("contagem baseada exclusivamente") ||
+            normalized.includes("seus dados")
+        );
+    }
+
     const sdrErrorsRanking = sdrErrors
-        .filter((item) => Number(item?.total_erros_sdr) > 0 && normalizeText(item?.nome) !== "Top 3 Erros")
+        .filter((item) => Number(item?.total_erros_sdr) > 0 && !isSdrErrorsInstructionRow(item?.nome))
         .map((item) => ({
             nome: normalizeText(item.nome),
             total: Number(item.total_erros_sdr) || 0,
             erros: Array.isArray(item.erros) ? item.erros : [],
         }))
         .sort((a, b) => b.total - a.total || a.nome.localeCompare(b.nome, "pt-BR"));
+
+    const totalCalls = filteredData.length;
+    const scheduledCalls = filteredData.filter((row) => isMeetingScheduled(row["Reunião Marcada?"])).length;
+    const scheduledPct = totalCalls > 0 ? Math.round((scheduledCalls / totalCalls) * 100) : 0;
+
+    let scoreSum = 0;
+    let scoreCount = 0;
+    filteredData.forEach((row) => {
+        SCORE_KEYS.forEach((key) => {
+            const value = parseFloat(row[key]);
+            if (!Number.isNaN(value)) {
+                scoreSum += value;
+                scoreCount += 1;
+            }
+        });
+    });
+    const avgScore = scoreCount > 0 ? (scoreSum / scoreCount).toFixed(1) : "—";
 
     return (
         <main className="min-h-screen p-5 md:p-8 bg-background text-foreground">
@@ -600,16 +997,84 @@ export default function Home() {
                 {activeTab === "dashboard" ? (
                     <>
 
-                {/* Stats & Charts Row */}
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                    <DashboardStats data={filteredData} />
-                    <div className="md:col-span-1 glass-panel camo-panel rounded-xl p-6 flex flex-col items-center justify-center border border-sky-300/20">
+                {/* Dashboard Cards Layout */}
+                <section className="grid grid-cols-1 gap-4 xl:grid-cols-3 xl:grid-rows-2">
+                    <div className="glass-panel camo-panel rounded-xl p-6 flex flex-col justify-between border border-sky-300/20 xl:col-start-1 xl:col-end-2 xl:row-start-1 xl:row-end-2">
+                        <div className="p-3 rounded-lg bg-sky-500/20 border border-sky-200/20 w-fit">
+                            <Phone className="w-6 h-6 text-sky-200" />
+                        </div>
+                        <div className="mt-4">
+                            <h3 className="text-sm font-medium text-slate-300">Total de Ligações</h3>
+                            <p className="text-3xl font-bold mt-1 text-sky-50 tracking-tight">{totalCalls}</p>
+                        </div>
+                    </div>
+
+                    <div className="glass-panel camo-panel rounded-xl p-6 flex flex-col justify-between border border-cyan-300/20 xl:col-start-1 xl:col-end-2 xl:row-start-2 xl:row-end-3">
+                        <div className="p-3 rounded-lg bg-cyan-500/20 border border-cyan-200/20 w-fit">
+                            <CalendarCheck className="w-6 h-6 text-cyan-200" />
+                        </div>
+                        <div className="mt-4">
+                            <h3 className="text-sm font-medium text-slate-300">Reuniões Marcadas</h3>
+                            <p className="text-3xl font-bold mt-1 text-sky-50 tracking-tight">{scheduledCalls}</p>
+                            <p className="text-xs text-slate-400 mt-1">{totalCalls > 0 ? `${scheduledPct}% de taxa` : "Sem ligações no período"}</p>
+                        </div>
+                    </div>
+
+                    <div className="glass-panel camo-panel rounded-xl p-6 flex flex-col justify-between border border-blue-300/20 xl:col-start-2 xl:col-end-3 xl:row-start-1 xl:row-end-2">
+                        <div className="p-3 rounded-lg bg-blue-500/20 border border-blue-200/20 w-fit">
+                            <TrendingUp className="w-6 h-6 text-blue-200" />
+                        </div>
+                        <div className="mt-4">
+                            <h3 className="text-sm font-medium text-slate-300">Score Médio</h3>
+                            <p className="text-3xl font-bold mt-1 text-sky-50 tracking-tight">{avgScore}</p>
+                            <p className="text-xs text-slate-400 mt-1">Média geral das ligações</p>
+                        </div>
+                    </div>
+
+                    <div className="glass-panel camo-panel rounded-xl p-5 border border-amber-300/30 bg-amber-500/5 xl:col-start-2 xl:col-end-3 xl:row-start-2 xl:row-end-3">
+                        <div className="flex items-start justify-between gap-3 mb-3">
+                            <div>
+                                <p className="text-xs uppercase tracking-wider text-amber-200/80 font-semibold">Caixa Postal</p>
+                                <h3 className="text-sm font-semibold text-amber-100 mt-1">Tentativas com Erro</h3>
+                            </div>
+                            <div className="px-2 py-1 rounded-md bg-amber-500/15 border border-amber-300/25 text-amber-100 text-xs font-semibold">
+                                Planilha externa
+                            </div>
+                        </div>
+
+                        <div className="text-4xl font-bold text-amber-100 leading-none">
+                            {voicemailLoading ? "..." : voicemailAccessError ? "—" : voicemailFilteredStats.errorAttempts}
+                        </div>
+                        <p className="text-xs text-slate-400 mt-2">
+                            {voicemailAccessError || `${voicemailFilteredStats.totalAttempts} tentativas analisadas em ${voicemailFilteredStats.totalRows} linhas (com filtros).`}
+                        </p>
+
+                        <a
+                            href={VOICEMAIL_SHEET_URL}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="mt-4 inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-amber-300/30 bg-amber-500/10 hover:bg-amber-500/20 text-amber-100 text-xs font-semibold transition-colors"
+                        >
+                            <ExternalLink size={13} />
+                            Abrir planilha
+                        </a>
+                    </div>
+
+                    <div className="glass-panel camo-panel rounded-xl p-6 flex flex-col items-center justify-center border border-sky-300/20 xl:col-start-3 xl:col-end-4 xl:row-start-1 xl:row-end-3">
                         <h3 className="w-full text-lg font-semibold mb-4 text-sky-100 text-left">Distribuição de Agendamentos</h3>
                         <SatisfactionChart data={filteredData} />
                     </div>
-                </div>
+                </section>
 
                 <div className="flex justify-end gap-2 flex-wrap">
+                    <button
+                        onClick={() => setFiltersOpen((prev) => !prev)}
+                        className="inline-flex items-center gap-2 px-4 py-2 bg-secondary/45 hover:bg-secondary/65 text-slate-200 border border-sky-300/20 rounded-lg transition-colors text-sm font-semibold"
+                    >
+                        <Filter size={15} />
+                        {filtersOpen ? "Ocultar filtros" : "Mostrar filtros"}
+                        {filtersOpen ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
+                    </button>
                     <button
                         onClick={() => setRankingModalOpen(true)}
                         className="px-4 py-2 bg-blue-500/20 hover:bg-blue-500/35 text-sky-100 border border-blue-300/35 rounded-lg transition-colors text-sm font-semibold glass-panel"
@@ -619,43 +1084,159 @@ export default function Home() {
                 </div>
 
                 {/* Filters Row */}
-                <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                    <div className="relative md:col-span-2">
-                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" />
-                        <input
-                            type="text"
-                            placeholder="Buscar prospect / empresa..."
-                            value={searchTerm}
-                            onChange={(e) => setSearchTerm(e.target.value)}
-                            className="w-full pl-10 pr-4 py-2 bg-secondary/45 border border-sky-300/20 rounded-lg focus:outline-none focus:ring-1 focus:ring-sky-500/60 text-sm text-sky-50 placeholder-slate-400"
-                        />
+                {filtersOpen && (
+                <section className="glass-panel camo-panel rounded-xl p-5 border border-sky-300/20 space-y-4">
+                    <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
+                        <div>
+                            <div className="flex items-center gap-2">
+                                <Filter className="w-4 h-4 text-sky-200" />
+                                <h3 className="text-sm font-semibold text-sky-100">Filtros da Visão Geral</h3>
+                            </div>
+                            <p className="text-xs text-slate-400 mt-1">
+                                Mostrando {filteredData.length} de {data.length} ligações
+                            </p>
+                        </div>
+                        {hasActiveFilters && (
+                            <span className="inline-flex items-center w-fit px-2.5 py-1 rounded-md text-[11px] font-semibold bg-sky-500/15 border border-sky-300/25 text-sky-100">
+                                Filtros ativos
+                            </span>
+                        )}
                     </div>
-                    <div className="relative">
-                        <select
-                            value={sdrFilter}
-                            onChange={(e) => setSdrFilter(e.target.value)}
-                            className="w-full px-4 py-2 bg-secondary/45 border border-sky-300/20 rounded-lg focus:outline-none focus:ring-1 focus:ring-sky-500/60 text-sm appearance-none cursor-pointer text-sky-50"
-                        >
-                            <option value="all" className="bg-[#1e1e1e] text-gray-300">Todos os SDRs</option>
-                            {sdrs.map((sdr) => (
-                                <option key={sdr.key} value={sdr.key} className="bg-[#1e1e1e] text-gray-300">{sdr.label}</option>
-                            ))}
-                        </select>
-                        <Filter className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500 pointer-events-none" />
+
+                    <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
+                        <div className="lg:col-span-5">
+                            <label className="block text-xs text-slate-300 mb-1.5 font-medium">Buscar prospect ou empresa</label>
+                            <div className="relative">
+                                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                                <input
+                                    type="text"
+                                    placeholder="Ex.: Acme, Tech Corp..."
+                                    value={searchTerm}
+                                    onChange={(e) => setSearchTerm(e.target.value)}
+                                    className="w-full pl-10 pr-4 py-2.5 bg-secondary/45 border border-sky-300/20 rounded-lg focus:outline-none focus:ring-1 focus:ring-sky-500/60 text-sm text-sky-50 placeholder-slate-400"
+                                />
+                            </div>
+                        </div>
+
+                        <div className="lg:col-span-3">
+                            <label className="block text-xs text-slate-300 mb-1.5 font-medium">SDR responsável</label>
+                            <div className="relative">
+                                <select
+                                    value={sdrFilter}
+                                    onChange={(e) => setSdrFilter(e.target.value)}
+                                    className="w-full pl-10 pr-9 py-2.5 bg-secondary/45 border border-sky-300/20 rounded-lg focus:outline-none focus:ring-1 focus:ring-sky-500/60 text-sm appearance-none cursor-pointer text-sky-50"
+                                >
+                                    <option value="all" className="bg-[#1e1e1e] text-gray-300">Todos os SDRs</option>
+                                    {sdrs.map((sdr) => (
+                                        <option key={sdr.key} value={sdr.key} className="bg-[#1e1e1e] text-gray-300">{sdr.label}</option>
+                                    ))}
+                                </select>
+                                <Users className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
+                                <Filter className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500 pointer-events-none" />
+                            </div>
+                        </div>
+
+                        <div className="lg:col-span-3">
+                            <label className="block text-xs text-slate-300 mb-1.5 font-medium">Status da ligação</label>
+                            <div className="relative">
+                                <select
+                                    value={meetingFilter}
+                                    onChange={(e) => setMeetingFilter(e.target.value)}
+                                    className="w-full pl-10 pr-9 py-2.5 bg-secondary/45 border border-sky-300/20 rounded-lg focus:outline-none focus:ring-1 focus:ring-sky-500/60 text-sm appearance-none cursor-pointer text-sky-50"
+                                >
+                                    <option value="all" className="bg-[#1e1e1e] text-gray-300">Todas as ligações</option>
+                                    <option value="yes" className="bg-[#1e1e1e] text-gray-300">Reunião marcada</option>
+                                    <option value="no" className="bg-[#1e1e1e] text-gray-300">Sem reunião</option>
+                                </select>
+                                <PhoneCall className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
+                                <Filter className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500 pointer-events-none" />
+                            </div>
+                        </div>
+
+                        <div className="lg:col-span-1 flex lg:items-end">
+                            <button
+                                onClick={clearFilters}
+                                disabled={!hasActiveFilters}
+                                className="inline-flex items-center justify-center gap-2 w-full px-3 py-2.5 bg-white/5 hover:bg-white/10 text-slate-200 border border-white/15 rounded-lg text-xs font-semibold transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                            >
+                                <Eraser size={13} />
+                                Limpar
+                            </button>
+                        </div>
                     </div>
-                    <div className="relative">
-                        <select
-                            value={meetingFilter}
-                            onChange={(e) => setMeetingFilter(e.target.value)}
-                            className="w-full px-4 py-2 bg-secondary/45 border border-sky-300/20 rounded-lg focus:outline-none focus:ring-1 focus:ring-sky-500/60 text-sm appearance-none cursor-pointer text-sky-50"
-                        >
-                            <option value="all" className="bg-[#1e1e1e] text-gray-300">Todas as Ligações</option>
-                            <option value="yes" className="bg-[#1e1e1e] text-gray-300">Reunião Marcada</option>
-                            <option value="no" className="bg-[#1e1e1e] text-gray-300">Sem Reunião</option>
-                        </select>
-                        <Filter className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500 pointer-events-none" />
+
+                    <div className="rounded-xl border border-sky-300/20 bg-secondary/25 p-3">
+                        <div className="flex flex-col xl:flex-row xl:items-end gap-3">
+                            <div className="xl:min-w-[300px]">
+                                <label className="block text-xs text-slate-300 mb-2 font-medium">Período (data)</label>
+                                <div className="flex flex-wrap gap-2">
+                                    <button
+                                        type="button"
+                                        onClick={() => applyDatePreset("today")}
+                                        className={`px-2.5 py-1 rounded-md text-xs font-semibold border transition-colors ${datePreset === "today"
+                                                ? "bg-sky-500/25 text-sky-100 border-sky-300/40"
+                                                : "bg-white/5 text-slate-300 border-white/15 hover:bg-white/10"
+                                            }`}
+                                    >
+                                        Hoje
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => applyDatePreset("yesterday")}
+                                        className={`px-2.5 py-1 rounded-md text-xs font-semibold border transition-colors ${datePreset === "yesterday"
+                                                ? "bg-sky-500/25 text-sky-100 border-sky-300/40"
+                                                : "bg-white/5 text-slate-300 border-white/15 hover:bg-white/10"
+                                            }`}
+                                    >
+                                        Ontem
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => applyDatePreset("this-week")}
+                                        className={`px-2.5 py-1 rounded-md text-xs font-semibold border transition-colors ${datePreset === "this-week"
+                                                ? "bg-sky-500/25 text-sky-100 border-sky-300/40"
+                                                : "bg-white/5 text-slate-300 border-white/15 hover:bg-white/10"
+                                            }`}
+                                    >
+                                        Essa semana
+                                    </button>
+                                </div>
+                            </div>
+
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 w-full">
+                                <div>
+                                    <label className="block text-[11px] text-slate-400 mb-1">De</label>
+                                    <div className="relative">
+                                        <CalendarRange className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
+                                        <input
+                                            type="date"
+                                            value={startDateFilter}
+                                            onChange={(e) => handleStartDateChange(e.target.value)}
+                                            className="w-full pl-10 pr-3 py-2.5 bg-secondary/45 border border-sky-300/20 rounded-lg focus:outline-none focus:ring-1 focus:ring-sky-500/60 text-sm text-sky-50"
+                                            aria-label="Data inicial"
+                                            title="Data inicial"
+                                        />
+                                    </div>
+                                </div>
+                                <div>
+                                    <label className="block text-[11px] text-slate-400 mb-1">Até</label>
+                                    <div className="relative">
+                                        <CalendarRange className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
+                                        <input
+                                            type="date"
+                                            value={endDateFilter}
+                                            onChange={(e) => handleEndDateChange(e.target.value)}
+                                            className="w-full pl-10 pr-3 py-2.5 bg-secondary/45 border border-sky-300/20 rounded-lg focus:outline-none focus:ring-1 focus:ring-sky-500/60 text-sm text-sky-50"
+                                            aria-label="Data final"
+                                            title="Data final"
+                                        />
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
                     </div>
-                </div>
+                </section>
+                )}
 
                 {/* Table Section */}
                 <section className="glass-panel camo-panel rounded-xl overflow-hidden">
@@ -694,6 +1275,22 @@ export default function Home() {
                     </div>
                 ) : (
                     <section className="glass-panel camo-panel rounded-xl p-5 md:p-6 border border-red-300/10">
+                                                {/* Day filter for Principais Erros */}
+                                                <div className="mb-4 flex items-center gap-2">
+                                                    <label htmlFor="mainErrorsDay" className="text-xs text-slate-300 font-medium">Filtrar por dia:</label>
+                                                    <input
+                                                        id="mainErrorsDay"
+                                                        type="date"
+                                                        value={mainErrorsDay}
+                                                        onChange={e => setMainErrorsDay(e.target.value)}
+                                                        className="px-2 py-1 rounded border border-sky-300/20 bg-secondary/30 text-sky-100 text-xs"
+                                                    />
+                                                    <button
+                                                        type="button"
+                                                        className="text-xs text-sky-200 underline"
+                                                        onClick={() => setMainErrorsDay("")}
+                                                    >Limpar filtro</button>
+                                                </div>
                         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-5 pb-5 border-b border-white/5">
                             <div className="flex items-center gap-2">
                                 <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/15 border border-emerald-400/30 text-xs font-semibold text-emerald-200">
@@ -710,7 +1307,7 @@ export default function Home() {
                                     : "Sincronizando..."}
                             </div>
                         </div>
-                        <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
+                        <div className="grid grid-cols-1 xl:grid-cols-1 gap-y-6">
                             <div className="xl:col-span-2 space-y-4">
                                 <div>
                                     <h2 className="impact-title text-3xl text-red-100">TOP Erros</h2>
@@ -793,7 +1390,8 @@ export default function Home() {
                             </button>
                         </div>
                         <div className="p-5 space-y-3">
-                            <label className="block text-xs text-gray-400">URL da Planilha Google Sheets</label>
+                                        {/* Principais Erros Header */}
+                                        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-5 pb-5 border-b border-white/5">
                             <input
                                 type="text"
                                 placeholder="Cole aqui o link da planilha..."
@@ -819,6 +1417,7 @@ export default function Home() {
                         </div>
                     </div>
                 </div>
+                </div>
             )}
 
             {/* Ranking Modal */}
@@ -838,7 +1437,7 @@ export default function Home() {
                             {sdrRanking.length === 0 && sdrCallsRanking.length === 0 && sdrScoreRanking.length === 0 ? (
                                 <p className="text-sm text-gray-500">Sem dados para montar o ranking.</p>
                             ) : (
-                                <div className="space-y-6">
+                                <div className="mt-8">
                                     <div>
                                         <h4 className="text-sm font-semibold text-sky-200 mb-2">Reuniões Agendadas</h4>
                                         <div className="space-y-2">
@@ -860,7 +1459,6 @@ export default function Home() {
                                             ))}
                                         </div>
                                     </div>
-
                                     <div>
                                         <h4 className="text-sm font-semibold text-cyan-200 mb-2">Ligações Realizadas</h4>
                                         <div className="space-y-2">
@@ -882,7 +1480,6 @@ export default function Home() {
                                             ))}
                                         </div>
                                     </div>
-
                                     <div>
                                         <h4 className="text-sm font-semibold text-emerald-200 mb-2">Ranking por Nota Média</h4>
                                         <div className="space-y-2">

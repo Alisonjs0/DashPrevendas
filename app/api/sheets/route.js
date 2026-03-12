@@ -41,7 +41,10 @@ export async function GET(request) {
         const response = await fetch(fetchUrl);
 
         if (!response.ok) {
-            throw new Error(`Failed to fetch sheet: ${response.status} ${response.statusText}`);
+            return NextResponse.json(
+                { error: `Failed to fetch sheet: ${response.status} ${response.statusText}` },
+                { status: response.status }
+            );
         }
 
         const csvText = await response.text();
