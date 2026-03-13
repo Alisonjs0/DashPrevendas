@@ -259,10 +259,6 @@ function parseRowDate(value) {
         if (!Number.isNaN(parsed.getTime())) return parsed.getTime();
     }
 
-    // Supports direct ISO values if they come without wrapper
-    const isoParsed = new Date(raw);
-    if (!Number.isNaN(isoParsed.getTime())) return isoParsed.getTime();
-
     // Supports dd/mm/yyyy hh:mm and dd-mm-yyyy hh:mm
     const dateTimeLocalMatch = raw.match(/^(\d{1,2})[-\/](\d{1,2})[-\/](\d{4})(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?)?$/);
     if (dateTimeLocalMatch) {
@@ -277,12 +273,19 @@ function parseRowDate(value) {
 
     // Supports dd-mm-yyyy and dd/mm/yyyy from sheet exports
     const match = raw.match(/^(\d{1,2})[-\/](\d{1,2})[-\/](\d{4})$/);
-    if (!match) return null;
+    if (match) {
+        const day = Number(match[1]);
+        const month = Number(match[2]) - 1;
+        const year = Number(match[3]);
+        return new Date(year, month, day).getTime();
+    }
 
-    const day = Number(match[1]);
-    const month = Number(match[2]) - 1;
-    const year = Number(match[3]);
-    return new Date(year, month, day).getTime();
+    // Supports direct ISO values if they come without wrapper
+    // Fallback parsing (but beware of MM/DD/YYYY misinterpretations by JS new Date)
+    const isoParsed = new Date(raw);
+    if (!Number.isNaN(isoParsed.getTime())) return isoParsed.getTime();
+
+    return null;
 }
 
 function formatDateTime(value) {

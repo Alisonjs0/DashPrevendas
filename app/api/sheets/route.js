@@ -1,6 +1,9 @@
 import Papa from 'papaparse';
 import { NextResponse } from 'next/server';
 
+// Force dynamic rendering so Next.js never serves this route from the static cache.
+export const dynamic = 'force-dynamic';
+
 export async function GET(request) {
     const { searchParams } = new URL(request.url);
     const sheetUrl = searchParams.get('url');
@@ -31,14 +34,17 @@ export async function GET(request) {
 
             // Check if it's already an export or pub link to avoid breaking valid ones.
             if (!sheetUrl.includes('/pub') && !sheetUrl.includes('/export')) {
-                fetchUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv${gid ? `&gid=${gid}` : ''}`;
+                // Add a cache-busting timestamp so Google's servers don't serve a cached CSV.
+                const cacheBuster = Date.now();
+                fetchUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv${gid ? `&gid=${gid}` : ''}&t=${cacheBuster}`;
             }
         }
     }
 
     try {
         console.log("Fetching sheet from URL:", fetchUrl);
-        const response = await fetch(fetchUrl);
+        // cache: 'no-store' disables Next.js data cache so every call fetches live data from Google Sheets.
+        const response = await fetch(fetchUrl, { cache: 'no-store' });
 
         if (!response.ok) {
             return NextResponse.json(
@@ -58,7 +64,9 @@ export async function GET(request) {
             console.warn('CSV Parsing errors:', errors);
         }
 
-        return NextResponse.json({ data });
+        return NextResponse.json({ data }, {
+            headers: { 'Cache-Control': 'no-store' },
+        });
     } catch (error) {
         console.error('Error fetching sheet:', error);
         return NextResponse.json({ error: error.message }, { status: 500 });
